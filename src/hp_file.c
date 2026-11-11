@@ -18,9 +18,19 @@
     }                         \
   }
 
+/* Βοηθητικές δομές */
+typedef struct Note {
+  struct BF_Block *pin_block;
+  struct HP_info *pin_info;
+} Note;
+
+/* Βοηθητικό array */
+static struct Note notes[BF_MAX_OPEN_FILES];
+
 HP_ErrorCode HP_CreateFile(const char *fileName) {
   /* TODO: δημιουργήστε το αρχείο, δεσμεύστε το πρώτο μπλοκ και αποθηκεύστε
      εκεί ένα στιγμιότυπο της HP_info */
+     return HP_ERROR;
 }
 
 HP_ErrorCode HP_OpenFile(const char *fileName, int *fileDesc) {
@@ -35,10 +45,49 @@ HP_ErrorCode HP_CloseFile(int fileDesc) {
 }
 
 HP_ErrorCode HP_InsertEntry(int fileDesc, Record record) {
-  /* TODO: βρείτε ή δεσμεύστε το κατάλληλο μπλοκ και αντιγράψτε εκεί την
-     εγγραφή με την blockSetRecord. Μην ξεχάσετε να ενημερώσετε τα
-     μεταδεδομένα του αρχείου. */
-  return HP_ERROR;
+  if (fileDesc < 0 || fileDesc >= BF_MAX_OPEN_FILES || notes[fileDesc].pin_info == NULL) {
+    fprintf(stderr, "Invalid file descriptor: %d\n", fileDesc);
+    return HP_ERROR;
+  }
+  HP_info *info = notes[fileDesc].pin_info;
+  int new_block_needed;
+  if (info->last_block == 0 || info->records_in_last_block >= info->records_per_block) 
+  {
+    new_block_needed = 1;
+  } else {
+    new_block_needed = 0;
+  }
+  BF_Block *block;
+  BF_Block_Init(&block);
+  if (new_block_needed) {
+    if (BF_AllocateBlock(fileDesc, block) != BF_OK) 
+    {
+      BF_PrintError(BF_ERROR);
+      BF_Block_Destroy(&block);
+      return HP_ERROR;
+    }
+    info->last_block++;
+    info->records_in_last_block = 0;
+  } else {
+    if (BF_GetBlock(fileDesc, info->last_block, block) != BF_OK) 
+    {
+      BF_PrintError(BF_ERROR);
+      BF_Block_Destroy(&block);
+      return HP_ERROR;
+    }
+  }
+  if (blockSetRecord(block, info->records_in_last_block, record) != 0) 
+  {
+    BF_PrintError(BF_ERROR);
+    BF_UnpinBlock(block);
+    BF_Block_Destroy(&block);  
+    return HP_ERROR;
+  }
+  info->records_in_last_block++;
+  BF_Block_SetDirty(notes[fileDesc].pin_block);
+  BF_UnpinBlock(block);
+  BF_Block_Destroy(&block);
+  return HP_OK;
 }
 
 HP_ErrorCode HP_PrintAllEntries(int fileDesc, char *fieldName, void *value) {

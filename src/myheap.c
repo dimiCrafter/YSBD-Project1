@@ -29,6 +29,31 @@
  */
 
 int main(int argc, char *argv[]) {
-  /* ... */
+  if (argc != 3 || strcmp(argv[1], "-i") != 0) 
+  {
+    fprintf(stderr, "Usage: %s -i <input_file.txt>\n", argv[0]);
+    return EXIT_FAILURE;
+  }
+  FILE* input;
+  input = fopen(argv[2], "r");
+  if (input == NULL) {
+    //Printing wich file i couldn't open
+    perror(argv[2]);
+    return EXIT_FAILURE;
+  }
+  fprintf(stdout, "Opened file %s\n", argv[2]);
+  char array[100];
+  int count = 0;
+  Record record;
+  while (fgets(array, sizeof(array), input) != NULL) {
+    if(sscanf(array, "%d %24s %19s %d %19s", &record.id, record.firstname, record.lastname, &record.postcode, record.city) != 5) {
+      fprintf(stderr, "Error parsing line: %s\n", array);
+      continue;
+    }
+    count++;
+    printRecord(record);
+  }
+  fprintf(stdout, "Number of records processed: %d\n", count);
+  fclose(input);
   return EXIT_SUCCESS;
 }
