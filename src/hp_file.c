@@ -46,7 +46,7 @@ HP_ErrorCode HP_CloseFile(int fileDesc) {
 
 HP_ErrorCode HP_InsertEntry(int fileDesc, Record record) {
   if (fileDesc < 0 || fileDesc >= BF_MAX_OPEN_FILES || notes[fileDesc].pin_info == NULL) {
-    fprintf(stderr, "Invalid file descriptor: %d\n", fileDesc);
+    fprintf(stderr, "Invalid fileDesc: %d\n", fileDesc);
     return HP_ERROR;
   }
   HP_info *info = notes[fileDesc].pin_info;
@@ -96,11 +96,55 @@ HP_ErrorCode HP_PrintAllEntries(int fileDesc, char *fieldName, void *value) {
   return HP_ERROR;
 }
 
-HP_ErrorCode HP_GetEntry(int fileDesc, int blockid, int position,
-                         Record *record) {
-  /* TODO: φέρτε το μπλοκ blockid και διαβάστε την εγγραφή της θέσης position
-     με την blockGetRecord */
-  return HP_ERROR;
+HP_ErrorCode HP_GetEntry(int fileDesc, int blockid, int position, Record *record) {
+  if (fileDesc < 0 || fileDesc >= BF_MAX_OPEN_FILES || notes[fileDesc].pin_info == NULL) {
+    fprintf(stderr, "Invalid fileDesc: %d\n", fileDesc);
+    if (record != NULL) {
+      memset(record, 0, sizeof(Record));
+    }
+    return HP_ERROR;
+  }
+  if (blockid <= 0 || blockid > notes[fileDesc].pin_info->last_block) {
+    fprintf(stderr, "Invalid blockid: %d\n", blockid);
+    if (record != NULL) {
+      memset(record, 0, sizeof(Record));
+    }
+    return HP_ERROR;
+  }
+  int block_count;
+  if (blockid < notes[fileDesc].pin_info->last_block)
+    block_count = notes[fileDesc].pin_info->records_per_block;
+  else
+    block_count = notes[fileDesc].pin_info->records_in_last_block;
+  if (position < 0 || position >= block_count) {
+    fprintf(stderr, "Invalid position: %d\n", position);
+    if (record != NULL) {
+      memset(record, 0, sizeof(Record));
+    }
+    return HP_ERROR;
+  }
+  BF_Block *block;
+  BF_Block_Init(&block);
+  BF_ErrorCode bf_err = BF_GetBlock(fileDesc, blockid, block);
+  if (bf_err != BF_OK) 
+  {
+    BF_PrintError(bf_err);
+    BF_Block_Destroy(&block);
+    memset(record, 0, sizeof(Record));
+    return HP_ERROR;
+  } 
+  if (blockGetRecord(block, position, record) != 0) 
+  {
+    fprintf(stderr, "Error retrieving record at block %d, position %d\n", blockid, position);
+    BF_UnpinBlock(block);
+    BF_Block_Destroy(&block);
+    memset(record, 0, sizeof(Record));
+    return HP_ERROR;
+  }
+  BF_UnpinBlock(block);
+  BF_Block_Destroy(&block);
+  
+  return HP_OK;
 }
 
 HP_ErrorCode HP_GetNextRecordWithID(int fileDesc, Record *record, void *value) {
