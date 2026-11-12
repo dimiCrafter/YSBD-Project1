@@ -65,13 +65,57 @@ HP_ErrorCode HP_CreateFile(
 HP_ErrorCode HP_OpenFile(
     const char *fileName,       /* όνομα αρχείου */
     int *fileDesc               /* αναγνωριστικός αριθμός ανοίγματος */){
-        
+    
+    int fd;
+    BF_Block *block;
+    CALL_BF(BF_OpenFile(fileName, &fd));
+
+    BF_Block_Init(&block);
+    if (BF_GetBlock(fd, 0, block) != BF_OK) {
+        BF_Block_Destroy(&block);
+        BF_CloseFile(fd);
+        return HP_ERROR;
+    }
+    HP_info *info = (HP_info *)BF_Block_GetData(block);
+
+    //error if its not heap file
+    if (strncmp(info->magic, "HEAPFILE", sizeof(info->magic)) != 0) {
+        BF_UnpinBlock(block);
+        BF_Block_Destroy(&block);
+        BF_CloseFile(fd);
+        return HP_ERROR;
+    }
+    info->it_active = 0;
+    info->it_value  = 0;
+    info->it_block  = 0;
+    info->it_slot   = 0;
+    BF_Block_SetDirty(block);
+
+    //making sure to unpin the block before returning
+    meta_block[fd] = block;
+    meta_info[fd]  = info;
+
+    *fileDesc = fd;
+    return HP_OK;    
 
     };
 
 /* Κλείνει το αρχείο που προσδιορίζεται από τον fileDesc. */
 HP_ErrorCode HP_CloseFile(
-    int fileDesc                /* αναγνωριστικός αριθμός ανοίγματος */);
+    int fileDesc                /* αναγνωριστικός αριθμός ανοίγματος */);{
+    if (fileDesc <0||fileDesc>=BF_MAX_OPEN_FILES||meta_block[fileDesc] == NULL)
+    return HP_ERROR;
+
+    BF_Block_SetDirty(meta_block[fileDesc]);
+    CALL_BF(BF_UnpinBlock(meta_block[fileDesc]));
+    BF_Block_Destroy(&meta_block[fileDesc]);
+    meta_block[fileDesc] = NULL;
+    meta_info[fileDesc]  = NULL;
+
+    CALL_BF(BF_CloseFile(fileDesc));
+    return HP_OK;
+
+    }
 
 /* Εισάγει την εγγραφή record στο τέλος του αρχείου σωρού, μετά την τρέχουσα
    τελευταία εγγραφή. */
