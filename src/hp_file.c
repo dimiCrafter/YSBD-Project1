@@ -17,21 +17,88 @@
       return HP_ERROR;        \
     }                         \
   }
+//metadata blocks
+static BF_Block *meta_block[BF_MAX_OPEN_FILES];
+static HP_info  *meta_info[BF_MAX_OPEN_FILES];
 
 HP_ErrorCode HP_CreateFile(const char *fileName) {
   /* TODO: δημιουργήστε το αρχείο, δεσμεύστε το πρώτο μπλοκ και αποθηκεύστε
      εκεί ένα στιγμιότυπο της HP_info */
+  int fd;
+  BF_Block *block;
+
+  CALL_BF(BF_CreateFile(fileName));
+  CALL_BF(BF_OpenFile(fileName, &fd));
+
+  BF_Block_Init(&block);
+  CALL_BF(BF_AllocateBlock(fd, block));
+
+  HP_info *info = (HP_info *)BF_Block_GetData(block);
+  memset(info, 0, sizeof(HP_info));
+  strcpy(info->magic, "HEAPFILE");
+  info->last_block = 0;             
+  info->records_in_last_block = 0;
+  info->records_per_block = RECORDS_PER_BLOCK;
+  info->it_active = 0;
+
+  BF_Block_SetDirty(block);
+  CALL_BF(BF_UnpinBlock(block));
+  BF_Block_Destroy(&block);
+  CALL_BF(BF_CloseFile(fd));
+  return HP_OK;
 }
 
 HP_ErrorCode HP_OpenFile(const char *fileName, int *fileDesc) {
   /* TODO: ανοίξτε το αρχείο, διαβάστε τα μεταδεδομένα από το πρώτο μπλοκ και
      ελέγξτε ότι πρόκειται όντως για αρχείο σωρού */
-  return HP_ERROR;
+  int fd;
+  BF_Block *block;
+
+  CALL_BF(BF_OpenFile(fileName, &fd));
+
+  BF_Block_Init(&block);
+  if (BF_GetBlock(fd, 0, block) != BF_OK) {
+    BF_Block_Destroy(&block);
+    BF_CloseFile(fd);
+    return HP_ERROR;
+  }
+
+  HP_info *info = (HP_info *)BF_Block_GetData(block);
+
+  if (strncmp(info->magic, "HEAPFILE", sizeof(info->magic)) != 0) {
+    BF_UnpinBlock(block);
+    BF_Block_Destroy(&block);
+    BF_CloseFile(fd);
+    return HP_ERROR;
+  }
+
+  info->it_active = 0;
+  info->it_value  = 0;
+  info->it_block  = 0;
+  info->it_slot   = 0;
+  BF_Block_SetDirty(block);
+
+  meta_block[fd] = block;
+  meta_info[fd]  = info;
+
+  *fileDesc = fd;
+  return HP_OK;
 }
 
 HP_ErrorCode HP_CloseFile(int fileDesc) {
   /* TODO: γράψτε στον δίσκο ό,τι εκκρεμεί και κλείστε το αρχείο */
-  return HP_ERROR;
+  if (fileDesc < 0 || fileDesc >= BF_MAX_OPEN_FILES ||
+      meta_block[fileDesc] == NULL)
+    return HP_ERROR;
+
+  BF_Block_SetDirty(meta_block[fileDesc]);
+  CALL_BF(BF_UnpinBlock(meta_block[fileDesc]));
+  BF_Block_Destroy(&meta_block[fileDesc]);
+  meta_block[fileDesc] = NULL;
+  meta_info[fileDesc]  = NULL;
+
+  CALL_BF(BF_CloseFile(fileDesc));
+  return HP_OK;
 }
 
 HP_ErrorCode HP_InsertEntry(int fileDesc, Record record) {
