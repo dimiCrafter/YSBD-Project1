@@ -148,7 +148,58 @@ HP_ErrorCode HP_GetEntry(int fileDesc, int blockid, int position, Record *record
 }
 
 HP_ErrorCode HP_GetNextRecordWithID(int fileDesc, Record *record, void *value) {
-  /* TODO: υλοποιήστε τον iterator. Η κατάσταση του (πού σταμάτησε η
-     προηγούμενη κλήση) πρέπει να επιβιώνει ανάμεσα στις κλήσεις. */
-  return HP_ERROR;
+  if (fileDesc < 0 || fileDesc >= BF_MAX_OPEN_FILES )
+  {
+    fprintf(stderr, "Invalid fileDesc: %d\n", fileDesc);
+    return HP_ERROR;
+  }
+  if (!record || !value) 
+  {
+    fprintf(stderr, "Invalid record or value pointer\n");
+    return HP_ERROR;
+  }
+  int check_target = *(int *)value;
+  //If no active search, we start from the beginning
+  if (notes[fileDesc].pin_info->it_active == 0 || notes[fileDesc].pin_info->it_value != check_target)
+  {
+    notes[fileDesc].pin_info->it_active = 1;
+    notes[fileDesc].pin_info->it_value = check_target;
+    notes[fileDesc].pin_info->it_block = 1;
+    notes[fileDesc].pin_info->it_slot = 0;
+  }
+  BF_Block *block;
+  BF_Block_Init(&block);
+  while (notes[fileDesc].pin_info->it_block <= notes[fileDesc].pin_info->last_block)
+  {
+    //Find how many records are in the current block
+    int block_count;
+    if (notes[fileDesc].pin_info->it_block < notes[fileDesc].pin_info->last_block)
+      block_count = notes[fileDesc].pin_info->records_per_block;
+    else
+      block_count = notes[fileDesc].pin_info->records_in_last_block;
+    if (BF_GetBlock(fileDesc, notes[fileDesc].pin_info->it_block, block) != BF_OK)
+    {
+      BF_PrintError(BF_ERROR);
+      BF_Block_Destroy(&block);
+      return HP_ERROR;
+    }
+    for (int i = notes[fileDesc].pin_info->it_slot; i < block_count; i++)
+    {
+      Record loc_rec;
+      blockGetRecord(block, i, &loc_rec);
+      if (loc_rec.id == check_target)
+      {
+        *record = loc_rec;
+        notes[fileDesc].pin_info->it_slot = i + 1;
+        BF_UnpinBlock(block);
+        BF_Block_Destroy(&block);
+        return HP_OK;
+      }
+    }
+  }
+  notes[fileDesc].pin_info->it_active = 0;
+  BF_Block_Destroy(&block);
+  return HP_EOF;
+
+  return HP_OK;
 }
