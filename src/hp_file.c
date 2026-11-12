@@ -21,6 +21,15 @@
 static BF_Block *meta_block[BF_MAX_OPEN_FILES];
 static HP_info  *meta_info[BF_MAX_OPEN_FILES];
 
+/* Βοηθητικές δομές */
+typedef struct Note {
+  struct BF_Block *pin_block;
+  struct HP_info *pin_info;
+} Note;
+
+/* Βοηθητικό array */
+static struct Note notes[BF_MAX_OPEN_FILES];
+
 HP_ErrorCode HP_CreateFile(const char *fileName) {
   /* TODO: δημιουργήστε το αρχείο, δεσμεύστε το πρώτο μπλοκ και αποθηκεύστε
      εκεί ένα στιγμιότυπο της HP_info */
@@ -102,10 +111,49 @@ HP_ErrorCode HP_CloseFile(int fileDesc) {
 }
 
 HP_ErrorCode HP_InsertEntry(int fileDesc, Record record) {
-  /* TODO: βρείτε ή δεσμεύστε το κατάλληλο μπλοκ και αντιγράψτε εκεί την
-     εγγραφή με την blockSetRecord. Μην ξεχάσετε να ενημερώσετε τα
-     μεταδεδομένα του αρχείου. */
-  return HP_ERROR;
+  if (fileDesc < 0 || fileDesc >= BF_MAX_OPEN_FILES || notes[fileDesc].pin_info == NULL) {
+    fprintf(stderr, "Invalid fileDesc: %d\n", fileDesc);
+    return HP_ERROR;
+  }
+  HP_info *info = notes[fileDesc].pin_info;
+  int new_block_needed;
+  if (info->last_block == 0 || info->records_in_last_block >= info->records_per_block) 
+  {
+    new_block_needed = 1;
+  } else {
+    new_block_needed = 0;
+  }
+  BF_Block *block;
+  BF_Block_Init(&block);
+  if (new_block_needed) {
+    if (BF_AllocateBlock(fileDesc, block) != BF_OK) 
+    {
+      BF_PrintError(BF_ERROR);
+      BF_Block_Destroy(&block);
+      return HP_ERROR;
+    }
+    info->last_block++;
+    info->records_in_last_block = 0;
+  } else {
+    if (BF_GetBlock(fileDesc, info->last_block, block) != BF_OK) 
+    {
+      BF_PrintError(BF_ERROR);
+      BF_Block_Destroy(&block);
+      return HP_ERROR;
+    }
+  }
+  if (blockSetRecord(block, info->records_in_last_block, record) != 0) 
+  {
+    BF_PrintError(BF_ERROR);
+    BF_UnpinBlock(block);
+    BF_Block_Destroy(&block);  
+    return HP_ERROR;
+  }
+  info->records_in_last_block++;
+  BF_Block_SetDirty(notes[fileDesc].pin_block);
+  BF_UnpinBlock(block);
+  BF_Block_Destroy(&block);
+  return HP_OK;
 }
 
 HP_ErrorCode HP_PrintAllEntries(int fileDesc, char *fieldName, void *value) {
@@ -114,15 +162,110 @@ HP_ErrorCode HP_PrintAllEntries(int fileDesc, char *fieldName, void *value) {
   return HP_ERROR;
 }
 
-HP_ErrorCode HP_GetEntry(int fileDesc, int blockid, int position,
-                         Record *record) {
-  /* TODO: φέρτε το μπλοκ blockid και διαβάστε την εγγραφή της θέσης position
-     με την blockGetRecord */
-  return HP_ERROR;
+HP_ErrorCode HP_GetEntry(int fileDesc, int blockid, int position, Record *record) {
+  if (fileDesc < 0 || fileDesc >= BF_MAX_OPEN_FILES || notes[fileDesc].pin_info == NULL) {
+    fprintf(stderr, "Invalid fileDesc: %d\n", fileDesc);
+    if (record != NULL) {
+      memset(record, 0, sizeof(Record));
+    }
+    return HP_ERROR;
+  }
+  if (blockid <= 0 || blockid > notes[fileDesc].pin_info->last_block) {
+    fprintf(stderr, "Invalid blockid: %d\n", blockid);
+    if (record != NULL) {
+      memset(record, 0, sizeof(Record));
+    }
+    return HP_ERROR;
+  }
+  int block_count;
+  if (blockid < notes[fileDesc].pin_info->last_block)
+    block_count = notes[fileDesc].pin_info->records_per_block;
+  else
+    block_count = notes[fileDesc].pin_info->records_in_last_block;
+  if (position < 0 || position >= block_count) {
+    fprintf(stderr, "Invalid position: %d\n", position);
+    if (record != NULL) {
+      memset(record, 0, sizeof(Record));
+    }
+    return HP_ERROR;
+  }
+  BF_Block *block;
+  BF_Block_Init(&block);
+  BF_ErrorCode bf_err = BF_GetBlock(fileDesc, blockid, block);
+  if (bf_err != BF_OK) 
+  {
+    BF_PrintError(bf_err);
+    BF_Block_Destroy(&block);
+    memset(record, 0, sizeof(Record));
+    return HP_ERROR;
+  } 
+  if (blockGetRecord(block, position, record) != 0) 
+  {
+    fprintf(stderr, "Error retrieving record at block %d, position %d\n", blockid, position);
+    BF_UnpinBlock(block);
+    BF_Block_Destroy(&block);
+    memset(record, 0, sizeof(Record));
+    return HP_ERROR;
+  }
+  BF_UnpinBlock(block);
+  BF_Block_Destroy(&block);
+  
+  return HP_OK;
 }
 
 HP_ErrorCode HP_GetNextRecordWithID(int fileDesc, Record *record, void *value) {
-  /* TODO: υλοποιήστε τον iterator. Η κατάσταση του (πού σταμάτησε η
-     προηγούμενη κλήση) πρέπει να επιβιώνει ανάμεσα στις κλήσεις. */
-  return HP_ERROR;
+  if (fileDesc < 0 || fileDesc >= BF_MAX_OPEN_FILES )
+  {
+    fprintf(stderr, "Invalid fileDesc: %d\n", fileDesc);
+    return HP_ERROR;
+  }
+  if (!record || !value) 
+  {
+    fprintf(stderr, "Invalid record or value pointer\n");
+    return HP_ERROR;
+  }
+  int check_target = *(int *)value;
+  //If no active search, we start from the beginning
+  if (notes[fileDesc].pin_info->it_active == 0 || notes[fileDesc].pin_info->it_value != check_target)
+  {
+    notes[fileDesc].pin_info->it_active = 1;
+    notes[fileDesc].pin_info->it_value = check_target;
+    notes[fileDesc].pin_info->it_block = 1;
+    notes[fileDesc].pin_info->it_slot = 0;
+  }
+  BF_Block *block;
+  BF_Block_Init(&block);
+  while (notes[fileDesc].pin_info->it_block <= notes[fileDesc].pin_info->last_block)
+  {
+    //Find how many records are in the current block
+    int block_count;
+    if (notes[fileDesc].pin_info->it_block < notes[fileDesc].pin_info->last_block)
+      block_count = notes[fileDesc].pin_info->records_per_block;
+    else
+      block_count = notes[fileDesc].pin_info->records_in_last_block;
+    if (BF_GetBlock(fileDesc, notes[fileDesc].pin_info->it_block, block) != BF_OK)
+    {
+      BF_PrintError(BF_ERROR);
+      BF_Block_Destroy(&block);
+      return HP_ERROR;
+    }
+    for (int i = notes[fileDesc].pin_info->it_slot; i < block_count; i++)
+    {
+      Record loc_rec;
+      blockGetRecord(block, i, &loc_rec);
+      if (loc_rec.id == check_target)
+      {
+        *record = loc_rec;
+        notes[fileDesc].pin_info->it_slot = i + 1;
+        BF_UnpinBlock(block);
+        BF_Block_Destroy(&block);
+        return HP_OK;
+      }
+    }
+  }
+  notes[fileDesc].pin_info->it_active = 0;
+  BF_Block_Destroy(&block);
+  return HP_EOF;
+
+  return HP_OK;
 }
