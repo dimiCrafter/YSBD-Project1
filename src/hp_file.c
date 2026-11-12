@@ -307,6 +307,11 @@ HP_ErrorCode HP_GetNextRecordWithID(int fileDesc, Record *record, void *value) {
     fprintf(stderr, "Invalid record or value pointer\n");
     return HP_ERROR;
   }
+  if (notes[fileDesc].pin_info == NULL) 
+  {
+    fprintf(stderr, "File not opened\n");
+    return HP_ERROR;
+  }
   int check_target = *(int *)value;
   //If no active search, we start from the beginning
   if (notes[fileDesc].pin_info->it_active == 0 || notes[fileDesc].pin_info->it_value != check_target)
@@ -315,11 +320,6 @@ HP_ErrorCode HP_GetNextRecordWithID(int fileDesc, Record *record, void *value) {
     notes[fileDesc].pin_info->it_value = check_target;
     notes[fileDesc].pin_info->it_block = 1;
     notes[fileDesc].pin_info->it_slot = 0;
-  }
-  if (notes[fileDesc].pin_info == NULL) 
-  {
-    fprintf(stderr, "File not opened\n");
-    return HP_ERROR;
   }
   BF_Block *block;
   BF_Block_Init(&block);
