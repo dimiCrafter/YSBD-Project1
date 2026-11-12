@@ -34,6 +34,7 @@ typedef struct HP_info {
 HP_ErrorCode HP_CreateFile(
     const char *fileName        /* όνομα αρχείου */);
 
+
 /* Ανοίγει το αρχείο fileName και διαβάζει από το πρώτο μπλοκ τα
    metadata του αρχείου σωρού. Επιστρέφει στη fileDesc τον αναγνωριστικό
    αριθμό ανοίγματος, όπως τον έδωσε το επίπεδο μπλοκ. Αν το αρχείο δεν είναι
