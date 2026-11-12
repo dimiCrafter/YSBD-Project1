@@ -17,11 +17,8 @@
       return HP_ERROR;        \
     }                         \
   }
-//metadata blocks
-static BF_Block *meta_block[BF_MAX_OPEN_FILES];
-static HP_info  *meta_info[BF_MAX_OPEN_FILES];
 
-/* Βοηθητικές δομές */
+/* Βοηθητικές δομές για μεταδεδομένα */
 typedef struct Note {
   struct BF_Block *pin_block;
   struct HP_info *pin_info;
@@ -29,6 +26,37 @@ typedef struct Note {
 
 /* Βοηθητικό array */
 static struct Note notes[BF_MAX_OPEN_FILES];
+
+/* Βοηθητική συνάρτηση για PrintAllEntries */
+static int compare_record_fields(Record *record, char *fieldName, void *value) 
+{
+  if (value == NULL) 
+  {
+    //Everything matches, so we print everything
+    return 1; 
+  }
+  if (strcmp(fieldName, "id") == 0) 
+  {
+    return record->id == *(int *)value;
+  } 
+  else if (strcmp(fieldName, "firstname") == 0) 
+  {
+    return strcmp(record->firstname, (char *)value) == 0;
+  } 
+  else if (strcmp(fieldName, "lastname") == 0) 
+  {
+    return strcmp(record->lastname, (char *)value) == 0;
+  } 
+  else if (strcmp(fieldName, "postcode") == 0) 
+  {
+    return record->postcode == *(int *)value;
+  } 
+  else if (strcmp(fieldName, "city") == 0) 
+  {
+    return strcmp(record->city, (char *)value) == 0;
+  }
+  return 0; // Invalid field name
+}
 
 HP_ErrorCode HP_CreateFile(const char *fileName) {
   /* TODO: δημιουργήστε το αρχείο, δεσμεύστε το πρώτο μπλοκ και αποθηκεύστε
@@ -87,8 +115,8 @@ HP_ErrorCode HP_OpenFile(const char *fileName, int *fileDesc) {
   info->it_slot   = 0;
   BF_Block_SetDirty(block);
 
-  meta_block[fd] = block;
-  meta_info[fd]  = info;
+  notes[fd].pin_block = block;
+  notes[fd].pin_info = info;
 
   *fileDesc = fd;
   return HP_OK;
@@ -97,14 +125,14 @@ HP_ErrorCode HP_OpenFile(const char *fileName, int *fileDesc) {
 HP_ErrorCode HP_CloseFile(int fileDesc) {
   /* TODO: γράψτε στον δίσκο ό,τι εκκρεμεί και κλείστε το αρχείο */
   if (fileDesc < 0 || fileDesc >= BF_MAX_OPEN_FILES ||
-      meta_block[fileDesc] == NULL)
+      notes[fileDesc].pin_info == NULL)
     return HP_ERROR;
 
-  BF_Block_SetDirty(meta_block[fileDesc]);
-  CALL_BF(BF_UnpinBlock(meta_block[fileDesc]));
-  BF_Block_Destroy(&meta_block[fileDesc]);
-  meta_block[fileDesc] = NULL;
-  meta_info[fileDesc]  = NULL;
+  BF_Block_SetDirty(notes[fileDesc].pin_block);
+  CALL_BF(BF_UnpinBlock(notes[fileDesc].pin_block));
+  BF_Block_Destroy(&notes[fileDesc].pin_block);
+  notes[fileDesc].pin_block = NULL;
+  notes[fileDesc].pin_info = NULL;
 
   CALL_BF(BF_CloseFile(fileDesc));
   return HP_OK;
@@ -159,7 +187,62 @@ HP_ErrorCode HP_InsertEntry(int fileDesc, Record record) {
 HP_ErrorCode HP_PrintAllEntries(int fileDesc, char *fieldName, void *value) {
   /* TODO: διατρέξτε τα μπλοκ του αρχείου και εκτυπώστε τις εγγραφές που στο
      πεδίο fieldName έχουν τιμή value. Αν value == NULL, εκτυπώστε τις όλες. */
-  return HP_ERROR;
+  if (fileDesc < 0 || fileDesc >= BF_MAX_OPEN_FILES )
+  {
+    fprintf(stderr, "Invalid fileDesc: %d\n", fileDesc);
+    return HP_ERROR;
+  }
+  if (value != NULL && fieldName == NULL) 
+  {
+    fprintf(stderr, "Don't know where to search\n");
+    return HP_ERROR;
+  }
+  if (value != NULL && (strcmp(fieldName, "id") != 0 && strcmp(fieldName, "firstname") != 0 &&
+      strcmp(fieldName, "lastname") != 0 && strcmp(fieldName, "postcode") != 0 &&
+      strcmp(fieldName, "city") != 0)) 
+  {
+    fprintf(stderr, "Invalid field name: %s\n", fieldName);
+    return HP_ERROR;
+  }
+  if (notes[fileDesc].pin_info == NULL) 
+  {
+    fprintf(stderr, "File not opened\n");
+    return HP_ERROR;
+  }
+  BF_Block *block;
+  BF_Block_Init(&block);
+  for (int i = 1; i <= notes[fileDesc].pin_info->last_block; i++) 
+  {
+    if (BF_GetBlock(fileDesc, i, block) != BF_OK) 
+    {
+      BF_PrintError(BF_ERROR);
+      BF_Block_Destroy(&block);
+      return HP_ERROR;
+    }
+    int block_count;
+    if (i < notes[fileDesc].pin_info->last_block)
+      block_count = notes[fileDesc].pin_info->records_per_block;
+    else
+      block_count = notes[fileDesc].pin_info->records_in_last_block;
+    for (int j = 0; j < block_count; j++)
+    {
+      Record record;
+      if (blockGetRecord(block, j, &record) != 0)
+      {
+        fprintf(stderr, "Error retrieving record at block %d, position %d\n", i, j);
+        BF_UnpinBlock(block);
+        BF_Block_Destroy(&block);
+        return HP_ERROR;
+      }
+      if (compare_record_fields(&record, fieldName, value))
+      {
+        printRecord(record);
+      }
+    }
+    BF_UnpinBlock(block);
+  }
+  BF_Block_Destroy(&block);
+  return HP_OK;
 }
 
 HP_ErrorCode HP_GetEntry(int fileDesc, int blockid, int position, Record *record) {
@@ -233,6 +316,11 @@ HP_ErrorCode HP_GetNextRecordWithID(int fileDesc, Record *record, void *value) {
     notes[fileDesc].pin_info->it_block = 1;
     notes[fileDesc].pin_info->it_slot = 0;
   }
+  if (notes[fileDesc].pin_info == NULL) 
+  {
+    fprintf(stderr, "File not opened\n");
+    return HP_ERROR;
+  }
   BF_Block *block;
   BF_Block_Init(&block);
   while (notes[fileDesc].pin_info->it_block <= notes[fileDesc].pin_info->last_block)
@@ -257,15 +345,19 @@ HP_ErrorCode HP_GetNextRecordWithID(int fileDesc, Record *record, void *value) {
       {
         *record = loc_rec;
         notes[fileDesc].pin_info->it_slot = i + 1;
+        BF_Block_SetDirty(notes[fileDesc].pin_block);
         BF_UnpinBlock(block);
         BF_Block_Destroy(&block);
         return HP_OK;
       }
     }
+    BF_UnpinBlock(block);
+    notes[fileDesc].pin_info->it_block++;
+    notes[fileDesc].pin_info->it_slot = 0;
   }
   notes[fileDesc].pin_info->it_active = 0;
+  BF_Block_SetDirty(notes[fileDesc].pin_block);
   BF_Block_Destroy(&block);
-  return HP_EOF;
 
-  return HP_OK;
+  return HP_EOF;
 }

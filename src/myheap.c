@@ -64,6 +64,7 @@ int main(int argc, char *argv[]) {
   int count = 0;
   Record record;
   while (fgets(array, sizeof(array), input) != NULL) {
+    memset(&record, 0, sizeof(Record));
     if(sscanf(array, "%d %24s %19s %d %19s", &record.id, record.firstname, record.lastname, &record.postcode, record.city) != 5) {
       fprintf(stderr, "Error parsing line: %s\n", array);
       continue;
@@ -80,6 +81,11 @@ int main(int argc, char *argv[]) {
   fprintf(stdout, "Number of records processed: %d\n", count);
   printf("printing all entries\n");
   HP_PrintAllEntries(fileDesc, NULL, NULL);
+  printf("Printing all entries with city = Athina\n");
+  HP_PrintAllEntries(fileDesc, "city", "Athina");
+  int test_postcode = 26221;
+  printf("Printing all entries with postcode = %d\n", test_postcode);
+  HP_PrintAllEntries(fileDesc, "postcode", &test_postcode);
   Record test_rec;
   //Entry with valid pos
   if(HP_GetEntry(fileDesc, 1, 0, &test_rec) != HP_OK)
