@@ -32,7 +32,31 @@ typedef struct HP_info {
 /* Δημιουργεί και αρχικοποιεί ένα άδειο αρχείο σωρού με όνομα fileName. Αν το
    αρχείο υπάρχει ήδη, επιστρέφεται κωδικός λάθους. */
 HP_ErrorCode HP_CreateFile(
-    const char *fileName        /* όνομα αρχείου */);
+    const char *fileName        /* όνομα αρχείου */)
+{
+    //file descriptor and block pointer
+    int fd;
+    BF_Block *block;
+    CALL_BF(BF_CreateFile(fileName));
+    CALL_BF(BF_OpenFile(fileName, &fd));
+
+    BF_Block_Init(&block);
+    CALL_BF(BF_AllocateBlock(fd, block));
+    //metadata intialization for heap file
+    HP_info *info = (HP_info *)BF_Block_GetData(block);
+    memset(info, 0, sizeof(HP_info));
+    strcpy(info->magic, "HEAPFILE");        
+    info->last_block = 0;                   
+    info->records_in_last_block = 0;
+    info->records_per_block = RECORDS_PER_BLOCK;
+    //initializing iterator values 
+    BF_Block_SetDirty(block);
+    CALL_BF(BF_UnpinBlock(block));
+    //free the blocks and close file
+    BF_Block_Destroy(&block);
+    CALL_BF(BF_CloseFile(fd));
+    return HP_OK;
+}
 
 /* Ανοίγει το αρχείο fileName και διαβάζει από το πρώτο μπλοκ τα
    metadata του αρχείου σωρού. Επιστρέφει στη fileDesc τον αναγνωριστικό
@@ -40,7 +64,10 @@ HP_ErrorCode HP_CreateFile(
    αρχείο σωρού, θεωρείται περίπτωση σφάλματος. */
 HP_ErrorCode HP_OpenFile(
     const char *fileName,       /* όνομα αρχείου */
-    int *fileDesc               /* αναγνωριστικός αριθμός ανοίγματος */);
+    int *fileDesc               /* αναγνωριστικός αριθμός ανοίγματος */){
+        
+
+    };
 
 /* Κλείνει το αρχείο που προσδιορίζεται από τον fileDesc. */
 HP_ErrorCode HP_CloseFile(
